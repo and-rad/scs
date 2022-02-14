@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -26,6 +27,10 @@ const (
 	// Destroyed indicates that the session data has been destroyed in the
 	// current request cycle.
 	Destroyed
+)
+
+var (
+	ErrNoSession = errors.New("scs: no session data in context")
 )
 
 type sessionData struct {
@@ -90,7 +95,10 @@ func (s *SessionManager) Load(ctx context.Context, token string) (context.Contex
 // Most applications will use the LoadAndSave() middleware and will not need to
 // use this method.
 func (s *SessionManager) Commit(ctx context.Context) (string, time.Time, error) {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return "", time.Time{}, err
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -126,12 +134,15 @@ func (s *SessionManager) Commit(ctx context.Context) (string, time.Time, error) 
 // status to Destroyed. Any further operations in the same request cycle will
 // result in a new session being created.
 func (s *SessionManager) Destroy(ctx context.Context) error {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return err
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
 
-	err := s.doStoreDelete(ctx, sd.token)
+	err = s.doStoreDelete(ctx, sd.token)
 	if err != nil {
 		return err
 	}
@@ -152,7 +163,10 @@ func (s *SessionManager) Destroy(ctx context.Context) error {
 // value for the key will be replaced. The session data status will be set to
 // Modified.
 func (s *SessionManager) Put(ctx context.Context, key string, val interface{}) {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return
+	}
 
 	sd.mu.Lock()
 	sd.values[key] = val
@@ -172,7 +186,10 @@ func (s *SessionManager) Put(ctx context.Context, key string, val interface{}) {
 // Also see the GetString(), GetInt(), GetBytes() and other helper methods which
 // wrap the type conversion for common types.
 func (s *SessionManager) Get(ctx context.Context, key string) interface{} {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return nil
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -185,7 +202,10 @@ func (s *SessionManager) Get(ctx context.Context, key string) interface{} {
 // session data status will be set to Modified. The return value has the type
 // interface{} so will usually need to be type asserted before you can use it.
 func (s *SessionManager) Pop(ctx context.Context, key string) interface{} {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return nil
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -204,7 +224,10 @@ func (s *SessionManager) Pop(ctx context.Context, key string) interface{} {
 // The session data status will be set to Modified. If the key is not present
 // this operation is a no-op.
 func (s *SessionManager) Remove(ctx context.Context, key string) {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -222,7 +245,10 @@ func (s *SessionManager) Remove(ctx context.Context, key string) {
 // lifetime are unaffected. If there is no data in the current session this is
 // a no-op.
 func (s *SessionManager) Clear(ctx context.Context) error {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return err
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -240,7 +266,10 @@ func (s *SessionManager) Clear(ctx context.Context) error {
 
 // Exists returns true if the given key is present in the session data.
 func (s *SessionManager) Exists(ctx context.Context, key string) bool {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return false
+	}
 
 	sd.mu.Lock()
 	_, exists := sd.values[key]
@@ -253,7 +282,10 @@ func (s *SessionManager) Exists(ctx context.Context, key string) bool {
 // alphabetically. If the data contains no data then an empty slice will be
 // returned.
 func (s *SessionManager) Keys(ctx context.Context) []string {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return []string{}
+	}
 
 	sd.mu.Lock()
 	keys := make([]string, len(sd.values))
@@ -279,12 +311,15 @@ func (s *SessionManager) Keys(ctx context.Context) []string {
 // logout operations). See https://github.com/OWASP/CheatSheetSeries/blob/master/cheatsheets/Session_Management_Cheat_Sheet.md#renew-the-session-id-after-any-privilege-level-change
 // for additional information.
 func (s *SessionManager) RenewToken(ctx context.Context) error {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return err
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
 
-	err := s.doStoreDelete(ctx, sd.token)
+	err = s.doStoreDelete(ctx, sd.token)
 	if err != nil {
 		return err
 	}
@@ -305,7 +340,10 @@ func (s *SessionManager) RenewToken(ctx context.Context) error {
 // session tokens are lost across an oauth or similar redirect flows. Use Clear()
 // if no values of the new session are to be used.
 func (s *SessionManager) MergeSession(ctx context.Context, token string) error {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return err
+	}
 
 	b, found, err := s.doStoreFind(ctx, token)
 	if err != nil {
@@ -341,7 +379,10 @@ func (s *SessionManager) MergeSession(ctx context.Context, token string) error {
 
 // Status returns the current status of the session data.
 func (s *SessionManager) Status(ctx context.Context) Status {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return Unmodified
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -567,7 +608,10 @@ func (s *SessionManager) Iterate(ctx context.Context, fn func(context.Context) e
 // that if you are using an idle timeout, it is possible that a session will
 // expire due to non-use before the returned deadline.
 func (s *SessionManager) Deadline(ctx context.Context) time.Time {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return time.Time{}
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -579,7 +623,10 @@ func (s *SessionManager) Deadline(ctx context.Context) time.Time {
 // empty string "" if it is called before the session has been committed to
 // the store.
 func (s *SessionManager) Token(ctx context.Context) string {
-	sd := s.getSessionDataFromContext(ctx)
+	sd, err := s.getSessionDataFromContext(ctx)
+	if err != nil {
+		return ""
+	}
 
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
@@ -591,12 +638,12 @@ func (s *SessionManager) addSessionDataToContext(ctx context.Context, sd *sessio
 	return context.WithValue(ctx, s.contextKey, sd)
 }
 
-func (s *SessionManager) getSessionDataFromContext(ctx context.Context) *sessionData {
+func (s *SessionManager) getSessionDataFromContext(ctx context.Context) (*sessionData, error) {
 	c, ok := ctx.Value(s.contextKey).(*sessionData)
 	if !ok {
-		panic("scs: no session data in context")
+		return nil, ErrNoSession
 	}
-	return c
+	return c, nil
 }
 
 func generateToken() (string, error) {

@@ -1,4 +1,4 @@
-module github.com/alexedwards/scs/rqlitestore
+module github.com/and-rad/scs/rqlitestore
 
 go 1.16
 

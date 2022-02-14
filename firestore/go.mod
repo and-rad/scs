@@ -1,4 +1,4 @@
-module github.com/alexedwards/scs/firestore
+module github.com/and-rad/scs/firestore
 
 go 1.12
 

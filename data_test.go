@@ -9,20 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexedwards/scs/v2/mockstore"
+	"github.com/and-rad/scs/v2/mockstore"
 )
 
 func TestSessionDataFromContext(t *testing.T) {
 	t.Parallel()
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("the code did not panic")
-		}
-	}()
-
 	s := New()
-	s.getSessionDataFromContext(context.Background())
+	if _, err := s.getSessionDataFromContext(context.Background()); err != ErrNoSession {
+		t.Errorf("the code did not panic")
+	}
 }
 
 func TestSessionManager_Load(T *testing.T) {
